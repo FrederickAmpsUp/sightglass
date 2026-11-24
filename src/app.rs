@@ -2,8 +2,15 @@ use crate::engine::Engine;
 
 use std::sync::Arc;
 use winit::{
-    application::ApplicationHandler, event::*, event_loop::{ActiveEventLoop, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::Window
+    application::ApplicationHandler,
+    event::*,
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
 };
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::UnwrapThrowExt;
 
 pub struct App {
     #[cfg(target_arch = "wasm32")]
@@ -32,7 +39,7 @@ impl ApplicationHandler<Engine> for App {
         {
             use wasm_bindgen::JsCast;
             use winit::platform::web::WindowAttributesExtWebSys;
-            
+
             const CANVAS_ID: &str = "canvas";
 
             let window = wgpu::web_sys::window().unwrap_throw();
@@ -58,11 +65,7 @@ impl ApplicationHandler<Engine> for App {
             if let Some(proxy) = self.proxy.take() {
                 wasm_bindgen_futures::spawn_local(async move {
                     assert!(proxy
-                        .send_event(
-                            Engine::new(window)
-                                .await
-                                .expect("Unable to create canvas!!!")
-                        )
+                        .send_event(Engine::new(window).await.expect("Unable to create canvas!"))
                         .is_ok())
                 });
             }
@@ -97,9 +100,13 @@ impl ApplicationHandler<Engine> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => engine.resize(size.width, size.height),
-            WindowEvent::RedrawRequested => {
-                engine.render();
-            }
+            WindowEvent::RedrawRequested => match engine.render() {
+                Ok(()) => (),
+                Err(e) => {
+                    log::error!("{}", e);
+                    event_loop.exit()
+                }
+            },
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -108,10 +115,7 @@ impl ApplicationHandler<Engine> for App {
                         ..
                     },
                 ..
-            } => match (code, key_state.is_pressed()) {
-                (KeyCode::Escape, true) => event_loop.exit(),
-                _ => {}
-            },
+            } => engine.handle_key(event_loop, code, key_state.is_pressed()),
             _ => {}
         }
     }
