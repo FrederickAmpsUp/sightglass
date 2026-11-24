@@ -2,10 +2,7 @@ use crate::engine::Engine;
 
 use std::sync::Arc;
 use winit::{
-    application::ApplicationHandler,
-    event::*,
-    event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
+    application::ApplicationHandler, event::*, event_loop::ActiveEventLoop, keyboard::PhysicalKey,
     window::Window,
 };
 
