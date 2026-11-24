@@ -1,8 +1,12 @@
 use crate::engine::Engine;
 
 use std::sync::Arc;
+#[allow(unused_imports)]
 use winit::{
-    application::ApplicationHandler, event::*, event_loop::ActiveEventLoop, keyboard::PhysicalKey,
+    application::ApplicationHandler,
+    event::*,
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::PhysicalKey,
     window::Window,
 };
 
@@ -75,7 +79,7 @@ impl ApplicationHandler<Engine> for App {
         #[cfg(target_arch = "wasm32")]
         {
             event.window.request_redraw();
-            event.resize(
+            event.renderer.resize(
                 event.window.inner_size().width,
                 event.window.inner_size().height,
             );
