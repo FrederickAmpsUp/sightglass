@@ -1,0 +1,9 @@
+SerSceneTemplate(
+    game_objects: [
+        SerSceneGameObjectInstantiation(
+            template_filename: "convex_refractor.ron",
+            x: 0,
+            y: 0,
+        )
+    ]
+)

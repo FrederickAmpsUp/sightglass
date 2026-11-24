@@ -1,0 +1,5 @@
+SerGameObjectTemplate(
+    width: 32,
+    height: 16,
+    sprite_filename: "convex_refractor.aseprite"
+)

@@ -25,12 +25,23 @@ web-sys = { version = "0.3", features = [
     "Element",
 ]}
 
+[target.wasm32-unknown-unknown.dependencies]
+gloo-net = "0.8.0"
+
 [dependencies]
 anyhow = "1.0.105"
+aseprite-io = "0.2.0"
 bytemuck = "1.25.2"
 clap = { version = "4.3.14", features = ["derive"] }
 env_logger = "0.11.12"
+futures = "0.3.34"
 glam = "0.34.3"
 log = "0.4.35"
+ron = "0.12.3"
+serde = { version = "1.0.229", features = ["derive"] }
 wgpu = "30.0.2"
 winit = "0.30.13"
+
+[build-dependencies]
+copy_to_output = "2.2.0"
+glob = "0.3.4"
