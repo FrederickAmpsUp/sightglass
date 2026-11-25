@@ -100,7 +100,7 @@ impl ApplicationHandler<Engine> for App {
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => engine.renderer.resize(size.width, size.height),
+            WindowEvent::Resized(size) => engine.resize(size.width, size.height),
             WindowEvent::RedrawRequested => match engine.render() {
                 Ok(()) => (),
                 Err(e) => {

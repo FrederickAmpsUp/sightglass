@@ -6,6 +6,7 @@ use wasm_bindgen::prelude::*;
 use winit::platform::web::EventLoopExtWebSys;
 
 mod app;
+mod assets;
 mod engine;
 mod renderer;
 

@@ -1,11 +1,15 @@
-use std::{any::{Any, TypeId}, collections::HashMap, sync::Arc};
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    sync::Arc,
+};
 
-use aseprite::AsepriteFile;
-use futures::{lock::Mutex, future::try_join_all};
-use serde::{Serialize, Deserialize};
 use anyhow::anyhow;
+use aseprite::AsepriteFile;
+use futures::{future::try_join_all, lock::Mutex};
+use serde::{Deserialize, Serialize};
 
-pub trait FromAssets : Sized + Send + Sync {
+pub trait FromAssets: Sized + Send + Sync {
     async fn from_assets(asset_manager: &AssetManager, filename: &str) -> anyhow::Result<Self>;
 }
 
@@ -13,7 +17,7 @@ pub trait FromAssets : Sized + Send + Sync {
 struct SerGameObjectTemplate {
     width: u32,
     height: u32,
-    sprite_filename: String
+    sprite_filename: String,
 }
 
 pub struct GameObjectTemplate {
@@ -33,7 +37,7 @@ impl FromAssets for GameObjectTemplate {
         Ok(Self {
             width: ser_self.width,
             height: ser_self.height,
-            sprite
+            sprite,
         })
     }
 }
@@ -54,11 +58,11 @@ struct SerSceneTemplate {
 pub struct SceneGameObjectInstantiation {
     pub template: Arc<GameObjectTemplate>,
     pub x: u32,
-    pub y: u32
+    pub y: u32,
 }
 
 pub struct SceneTemplate {
-    pub game_objects: Vec<SceneGameObjectInstantiation>
+    pub game_objects: Vec<SceneGameObjectInstantiation>,
 }
 
 impl FromAssets for SceneTemplate {
@@ -67,17 +71,18 @@ impl FromAssets for SceneTemplate {
         let ser_self: SerSceneTemplate = ron::from_str(str::from_utf8(&bytes)?)?;
 
         let game_objects = try_join_all(ser_self.game_objects.iter().map(async |ser_go| {
-            let template: Arc<GameObjectTemplate> = asset_manager.get_or_load(&ser_go.template_filename).await?;
+            let template: Arc<GameObjectTemplate> =
+                asset_manager.get_or_load(&ser_go.template_filename).await?;
 
             Ok::<_, anyhow::Error>(SceneGameObjectInstantiation {
                 template,
-                x: ser_go.x, y: ser_go.y
+                x: ser_go.x,
+                y: ser_go.y,
             })
-        })).await?;
+        }))
+        .await?;
 
-        Ok(Self {
-            game_objects
-        })
+        Ok(Self { game_objects })
     }
 }
 
@@ -92,7 +97,10 @@ impl AssetManager {
         }
     }
 
-    pub async fn get_or_load<T: 'static + FromAssets>(&self, filename: &str) -> anyhow::Result<Arc<T>> {
+    pub async fn get_or_load<T: 'static + FromAssets>(
+        &self,
+        filename: &str,
+    ) -> anyhow::Result<Arc<T>> {
         let type_id = TypeId::of::<T>();
         let key = (type_id, filename.to_string());
 
@@ -100,8 +108,10 @@ impl AssetManager {
             let cache = self.assets.lock().await;
             if let Some(gen_asset) = cache.get(&key) {
                 match gen_asset.clone().downcast::<T>() {
-                    Ok(asset) => { return Ok(asset); },
-                    Err(_) => unreachable!("item insert as (TypeId::of::<T>(), ...) is of type T")
+                    Ok(asset) => {
+                        return Ok(asset);
+                    }
+                    Err(_) => unreachable!("item insert as (TypeId::of::<T>(), ...) is of type T"),
                 }
             }
         }
@@ -120,7 +130,8 @@ impl AssetManager {
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn load_asset(filename: &str) -> anyhow::Result<Vec<u8>> {
     let exe_path = std::env::current_exe()?;
-    let exe_dir = exe_path.parent()
+    let exe_dir = exe_path
+        .parent()
         .ok_or_else(|| anyhow!("Executable has no parent directory"))?;
 
     let asset_path = exe_dir.join("assets").join(filename);
@@ -134,11 +145,14 @@ pub async fn load_asset(filename: &str) -> anyhow::Result<Vec<u8>> {
 
     let url = format!("/assets/{}", filename.trim_start_matches("/"));
 
-    let response = Request::get(&url)
-        .send().await?;
+    let response = Request::get(&url).send().await?;
 
     if !response.ok() {
-        return Err(anyhow!("HTTP Error {} while fetching {}", response.status(), url));
+        return Err(anyhow!(
+            "HTTP Error {} while fetching {}",
+            response.status(),
+            url
+        ));
     }
 
     Ok(response.binary().await?)

@@ -10,8 +10,9 @@
       packages = with pkgs; [
         just
         nixd # Nix language server
+        wgsl-analyzer
         bacon
-        
+
         (rust-bin.stable.latest.default.override {
           targets = [ "wasm32-unknown-unknown" ];
         })
