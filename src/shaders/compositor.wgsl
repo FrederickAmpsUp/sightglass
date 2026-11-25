@@ -42,7 +42,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     )[vertex_index];
 
     out.clip_position = vec4<f32>(normpos, 0.0, 1.0);
-    out.world_position = (normpos * 0.5 + 0.5) * 128;
+    out.world_position = (normpos * 0.5 + 0.5) * 1024;
 
     return out;
 }
