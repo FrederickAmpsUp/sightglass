@@ -1,15 +1,26 @@
-use crate::{game_object::GameObject, sprite_atlas::SpriteAtlas};
+use crate::{game_object::GameObject, sprite_atlas::SpriteAtlas, viewport::Viewport};
 use bytemuck::{offset_of, Pod, Zeroable};
 use std::sync::Arc;
 use winit::window::Window;
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, Pod, Zeroable)]
-pub struct GBufferInstanceInput {
-    size: glam::Vec2,
-    position: glam::Vec2,
-    rotation: f32,
-    texture_offset: [u32; 2],
+struct GBufferInstanceInput {
+    pub size: glam::Vec2,
+    pub position: glam::Vec2,
+    pub rotation: f32,
+    pub texture_offset: [u32; 2],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Pod, Zeroable)]
+struct Uniforms {
+    pub time: f32,
+
+    pub dirty: u32,
+
+    pub viewport_center: glam::Vec2,
+    pub viewport_size: glam::Vec2,
 }
 
 pub struct Renderer {
@@ -18,6 +29,10 @@ pub struct Renderer {
     is_surface_configured: bool,
     device: wgpu::Device,
     pub queue: wgpu::Queue,
+
+    uniforms: Uniforms,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
 
     pub sprite_atlas: SpriteAtlas,
     sprite_atlas_type_view: wgpu::TextureView,
@@ -137,6 +152,41 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
+
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uniform buffer"),
+            size: size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("uniform bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZero::new(size_of::<Uniforms>() as u64),
+                    },
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    count: None,
+                }],
+            });
+
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("uniform bind group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+        });
 
         let gbuffer_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("gbuffer instance buffer"),
@@ -345,7 +395,7 @@ impl Renderer {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("gbuffer pipeline layout"),
                 bind_group_layouts: &[
-                    None, // reserved for uniforms
+                    Some(&uniform_bind_group_layout),
                     Some(&sprite_atlas_bind_group_layout),
                 ],
                 immediate_size: 0,
@@ -476,7 +526,7 @@ impl Renderer {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("compositor pipeline layout"),
                 bind_group_layouts: &[
-                    None, // reserved for uniforms
+                    Some(&uniform_bind_group_layout),
                     Some(&gbuffer_bind_group_layout),
                 ],
                 immediate_size: 0,
@@ -527,6 +577,10 @@ impl Renderer {
             device,
             queue,
 
+            uniforms: Uniforms::default(),
+            uniform_buffer,
+            uniform_bind_group,
+
             sprite_atlas: SpriteAtlas::new(sprite_atlas_type, sprite_atlas_albd, sprite_atlas_norm),
 
             sprite_atlas_type_view,
@@ -572,6 +626,10 @@ impl Renderer {
             return Ok(());
         }
 
+        if self.uniforms.dirty != 0 {
+            self.upload_uniforms();
+        }
+
         let output = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(surface_texture) => surface_texture,
             wgpu::CurrentSurfaceTexture::Suboptimal(surface_texture) => surface_texture,
@@ -587,7 +645,7 @@ impl Renderer {
             }
             wgpu::CurrentSurfaceTexture::Lost => {
                 // where did it go
-                anyhow::bail!("Lost device");
+                anyhow::bail!("Lost surface/device");
             }
         };
 
@@ -660,6 +718,7 @@ impl Renderer {
 
             if self.gbuffer_instance_count > 0 {
                 gbuffer_pass.set_pipeline(&self.gbuffer_pipeline);
+                gbuffer_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 gbuffer_pass.set_bind_group(1, &self.sprite_atlas_bind_group, &[]);
                 gbuffer_pass.set_vertex_buffer(0, self.gbuffer_instance_buffer.slice(..));
                 gbuffer_pass.draw(0..4, 0..(self.gbuffer_instance_count as u32));
@@ -690,6 +749,7 @@ impl Renderer {
             });
 
             compositor_pass.set_pipeline(&self.compositor_pipeline);
+            compositor_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             compositor_pass.set_bind_group(1, &self.gbuffer_bind_group, &[]);
             compositor_pass.draw(0..4, 0..1);
         }
@@ -698,6 +758,24 @@ impl Renderer {
         self.queue.present(output);
 
         Ok(())
+    }
+
+    pub fn set_viewport(&mut self, viewport: &Viewport) {
+        self.uniforms.viewport_center = viewport.center;
+        self.uniforms.viewport_size.x = viewport.width;
+        self.uniforms.viewport_size.y =
+            viewport.width * self.surface_config.height as f32 / self.surface_config.width as f32;
+
+        self.uniforms.dirty = 1;
+    }
+
+    fn upload_uniforms(&mut self) {
+        self.queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.uniforms]),
+        );
+        self.uniforms.dirty = 0;
     }
 
     fn grow_gbuffer_instance_buffer(&mut self, min_capacity: u64) {
@@ -721,7 +799,7 @@ impl Renderer {
         self.gbuffer_instance_capacity = new_capacity;
     }
 
-    pub fn write_gbuffer_instances(
+    fn write_gbuffer_instances(
         &mut self,
         start_pos: u64,
         instances: &[GBufferInstanceInput],

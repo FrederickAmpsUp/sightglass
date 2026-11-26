@@ -1,7 +1,12 @@
+use glam::Vec2;
+
 use crate::engine::Engine;
 use crate::game_object::GameObject;
+use crate::viewport::Viewport;
 
 pub struct Scene {
+    pub viewport: Viewport,
+
     pub game_objects: Vec<GameObject>,
 }
 
@@ -11,6 +16,7 @@ impl Scene {
         template: &crate::assets::SceneTemplate,
     ) -> anyhow::Result<Self> {
         Ok(Self {
+            viewport: template.initial_viewport,
             game_objects: template
                 .game_objects
                 .iter()

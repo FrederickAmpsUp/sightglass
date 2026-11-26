@@ -10,6 +10,7 @@ use futures::{future::try_join_all, lock::Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::transform::Transform;
+use crate::viewport::Viewport;
 
 // the future must be Send on native and !Send on web
 #[cfg(target_arch = "wasm32")]
@@ -78,6 +79,7 @@ struct SerSceneGameObjectInstantiation {
 
 #[derive(Serialize, Deserialize)]
 struct SerSceneTemplate {
+    initial_viewport: Viewport,
     game_objects: Vec<SerSceneGameObjectInstantiation>,
 }
 
@@ -87,6 +89,7 @@ pub struct SceneGameObjectInstantiation {
 }
 
 pub struct SceneTemplate {
+    pub initial_viewport: Viewport,
     pub game_objects: Vec<SceneGameObjectInstantiation>,
 }
 
@@ -109,7 +112,10 @@ impl FromAssets for SceneTemplate {
         }))
         .await?;
 
-        Ok(Self { game_objects })
+        Ok(Self {
+            initial_viewport: ser_self.initial_viewport,
+            game_objects,
+        })
     }
 }
 

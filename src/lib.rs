@@ -14,6 +14,7 @@ mod renderer;
 mod scene;
 mod sprite_atlas;
 mod transform;
+mod viewport;
 
 use crate::app::App;
 

@@ -7,6 +7,15 @@ struct FragmentOutput {
     @location(0) frame_buf: vec4<f32>,
 }
 
+struct Uniforms {
+    time: f32,
+    viewport_center: vec2<f32>,
+    viewport_size: vec2<f32>,
+}
+
+@group(0) @binding(0)
+var<uniform> uniforms: Uniforms;
+
 @group(1) @binding(0)
 var gb_type: texture_2d<u32>;
 @group(1) @binding(1)
@@ -42,7 +51,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     )[vertex_index];
 
     out.clip_position = vec4<f32>(normpos, 0.0, 1.0);
-    out.world_position = (normpos * 0.5 + 0.5) * 1024.0;
+    out.world_position = normpos * (uniforms.viewport_size / 2.0) + uniforms.viewport_center;
 
     return out;
 }

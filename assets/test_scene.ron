@@ -1,4 +1,8 @@
 SerSceneTemplate(
+    initial_viewport: (
+        center: Vec2(512.0, 512.0),
+        width: 128.0,
+    ),
     game_objects: [
         (
             template_filename: "convex_refractor.ron",

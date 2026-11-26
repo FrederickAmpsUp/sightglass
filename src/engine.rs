@@ -55,6 +55,7 @@ impl Engine {
         self.window.request_redraw();
 
         if let Some(scene) = &self.scene {
+            self.renderer.set_viewport(&scene.viewport);
             self.renderer.update_gameobjects(&scene.game_objects)?;
         }
 
