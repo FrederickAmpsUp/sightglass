@@ -61,8 +61,10 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
 
     let gbuffer_sample = sample_gbuffer(in.world_position);
-    out.frame_buf = vec4<f32>(gbuffer_sample.gb_albd.rgb, 1.0);
+    var col = vec4<f32>(gbuffer_sample.gb_norm.rgb, 1.0);
+    col = max(col, vec4<f32>(0.0));
 
+    out.frame_buf = pow(col, vec4<f32>(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2, 1.0));
     return out;
 }
 

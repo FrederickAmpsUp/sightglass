@@ -7,6 +7,7 @@ use winit::platform::web::EventLoopExtWebSys;
 
 mod app;
 mod assets;
+mod clock;
 mod engine;
 mod future;
 mod game_object;

@@ -1,6 +1,6 @@
 SerSceneTemplate(
     initial_viewport: (
-        center: Vec2(512.0, 512.0),
+        center: Vec2(488.0, 512.0),
         width: 128.0,
     ),
     game_objects: [

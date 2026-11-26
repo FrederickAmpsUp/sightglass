@@ -12,7 +12,8 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 
     @location(1) @interpolate(flat) size: vec2<f32>,
-    @location(2) @interpolate(flat) texture_offset: vec2<u32>
+    @location(2) @interpolate(flat) texture_offset: vec2<u32>,
+    @location(3) @interpolate(flat) rotation: f32,
 }
 
 struct FragmentOutput {
@@ -70,6 +71,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
     out.size = in.size;
     out.texture_offset = in.texture_offset;
+    out.rotation = in.rotation;
 
     return out;
 }
@@ -82,7 +84,9 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
 
     out.gb_type = sprite.s_type;
     out.gb_albd = sprite.s_albd;
-    out.gb_norm = sprite.s_norm;
+    // rotate the normals
+    out.gb_norm = vec4<f32>(normalize(rotate2d(-in.rotation) * (sprite.s_norm.xy * 2.0 - 1.0)), 0.0, 0.0);
+    out.gb_norm *= f32(sprite.s_type != 0); // zero the normals where the sprite does not exist
 
     return out;
 }

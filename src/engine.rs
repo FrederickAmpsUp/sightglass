@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
-use crate::assets::AssetManager;
-use crate::renderer::Renderer;
-use crate::scene::Scene;
+use crate::{assets::AssetManager, clock::Clock, renderer::Renderer, scene::Scene};
 
 pub struct Engine {
     pub renderer: Renderer,
     pub asset_manager: AssetManager,
 
+    pub clock: Clock,
     pub scene: Option<Scene>,
 
     pub window: Arc<Window>,
@@ -25,6 +24,7 @@ impl Engine {
         Ok(Self {
             renderer: Renderer::new(window.clone()).await?,
             asset_manager,
+            clock: Clock::new(),
             scene: None,
             window,
         })
@@ -42,9 +42,16 @@ impl Engine {
     }
 
     pub fn update(&mut self) -> anyhow::Result<()> {
+        let (time, dt) = self.clock.tick();
         if self.scene.is_none() {
             if let Some(scene_template) = self.asset_manager.try_load("test_scene.ron") {
                 self.scene = Some(Scene::from_template(self, &scene_template)?);
+            }
+        }
+
+        if let Some(scene) = &mut self.scene {
+            for go in &mut scene.game_objects {
+                go.transform.rotation += dt;
             }
         }
 
