@@ -8,7 +8,12 @@ use winit::platform::web::EventLoopExtWebSys;
 mod app;
 mod assets;
 mod engine;
+mod future;
+mod game_object;
 mod renderer;
+mod scene;
+mod sprite_atlas;
+mod transform;
 
 use crate::app::App;
 

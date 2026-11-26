@@ -1,12 +1,33 @@
+use crate::{game_object::GameObject, sprite_atlas::SpriteAtlas};
+use bytemuck::{offset_of, Pod, Zeroable};
 use std::sync::Arc;
 use winit::window::Window;
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, Pod, Zeroable)]
+pub struct GBufferInstanceInput {
+    size: glam::Vec2,
+    position: glam::Vec2,
+    rotation: f32,
+    texture_offset: [u32; 2],
+}
 
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub queue: wgpu::Queue,
+
+    pub sprite_atlas: SpriteAtlas,
+    sprite_atlas_type_view: wgpu::TextureView,
+    sprite_atlas_albd_view: wgpu::TextureView,
+    sprite_atlas_norm_view: wgpu::TextureView,
+    sprite_atlas_bind_group: wgpu::BindGroup,
+
+    gbuffer_instance_count: u64,
+    gbuffer_instance_capacity: u64,
+    gbuffer_instance_buffer: wgpu::Buffer,
 
     gbuffer_type: wgpu::Texture,
     gbuffer_albd: wgpu::Texture,
@@ -28,6 +49,13 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    const SPRITE_TYPE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Uint;
+    const SPRITE_ALBD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+    const SPRITE_NORM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+    const SPRITE_ATLAS_WIDTH: u32 = 1024;
+    const SPRITE_ATLAS_HEIGHT: u32 = 1024;
+
     const GBUFFER_TYPE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Uint;
     const GBUFFER_ALBD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const GBUFFER_NORM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -109,6 +137,127 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
+
+        let gbuffer_instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gbuffer instance buffer"),
+            size: 0,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let sprite_atlas_type = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sprite atlas type"),
+            size: wgpu::Extent3d {
+                width: Self::SPRITE_ATLAS_WIDTH,
+                height: Self::SPRITE_ATLAS_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::SPRITE_TYPE_FORMAT,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[Self::SPRITE_TYPE_FORMAT],
+        });
+
+        let sprite_atlas_albd = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sprite atlas albd"),
+            size: wgpu::Extent3d {
+                width: Self::SPRITE_ATLAS_WIDTH,
+                height: Self::SPRITE_ATLAS_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::SPRITE_ALBD_FORMAT,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[Self::SPRITE_ALBD_FORMAT],
+        });
+
+        let sprite_atlas_norm = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sprite altas norm"),
+            size: wgpu::Extent3d {
+                width: Self::SPRITE_ATLAS_WIDTH,
+                height: Self::SPRITE_ATLAS_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::SPRITE_NORM_FORMAT,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[Self::SPRITE_NORM_FORMAT],
+        });
+
+        let sprite_atlas_type_view =
+            sprite_atlas_type.create_view(&wgpu::TextureViewDescriptor::default());
+        let sprite_atlas_albd_view =
+            sprite_atlas_albd.create_view(&wgpu::TextureViewDescriptor::default());
+        let sprite_atlas_norm_view =
+            sprite_atlas_norm.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sprite_atlas_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("sprite atlas bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        // type
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Uint,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        // albd
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        // norm
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let sprite_atlas_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sprite atlas bind group"),
+            layout: &sprite_atlas_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    // type
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&sprite_atlas_type_view),
+                },
+                wgpu::BindGroupEntry {
+                    // albd
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&sprite_atlas_albd_view),
+                },
+                wgpu::BindGroupEntry {
+                    // norm
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&sprite_atlas_norm_view),
+                },
+            ],
+        });
 
         let gbuffer_type = Self::create_world_buffer(&device, Self::GBUFFER_TYPE_FORMAT);
         let gbuffer_albd = Self::create_world_buffer(&device, Self::GBUFFER_ALBD_FORMAT);
@@ -195,7 +344,10 @@ impl Renderer {
         let gbuffer_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("gbuffer pipeline layout"),
-                bind_group_layouts: &[],
+                bind_group_layouts: &[
+                    None, // reserved for uniforms
+                    Some(&sprite_atlas_bind_group_layout),
+                ],
                 immediate_size: 0,
             });
 
@@ -205,7 +357,36 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &gbuffer_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<GBufferInstanceInput>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            // size
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: offset_of!(GBufferInstanceInput, size) as u64,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            // position
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: offset_of!(GBufferInstanceInput, position) as u64,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            // rotation
+                            format: wgpu::VertexFormat::Float32,
+                            offset: offset_of!(GBufferInstanceInput, rotation) as u64,
+                            shader_location: 2,
+                        },
+                        wgpu::VertexAttribute {
+                            // texture_offset
+                            format: wgpu::VertexFormat::Uint32x2,
+                            offset: offset_of!(GBufferInstanceInput, texture_offset) as u64,
+                            shader_location: 3,
+                        },
+                    ],
+                })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -259,7 +440,7 @@ impl Renderer {
 
         let lighting_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("gbuffer pipeline layout"),
+                label: Some("lighting pipeline layout"),
                 bind_group_layouts: &[],
                 immediate_size: 0,
             });
@@ -345,6 +526,18 @@ impl Renderer {
             is_surface_configured: false,
             device,
             queue,
+
+            sprite_atlas: SpriteAtlas::new(sprite_atlas_type, sprite_atlas_albd, sprite_atlas_norm),
+
+            sprite_atlas_type_view,
+            sprite_atlas_albd_view,
+            sprite_atlas_norm_view,
+
+            sprite_atlas_bind_group,
+
+            gbuffer_instance_count: 0,
+            gbuffer_instance_capacity: 0,
+            gbuffer_instance_buffer,
 
             gbuffer_type,
             gbuffer_albd,
@@ -465,13 +658,17 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            gbuffer_pass.set_pipeline(&self.gbuffer_pipeline);
-            gbuffer_pass.draw(0..4, 0..1);
+            if self.gbuffer_instance_count > 0 {
+                gbuffer_pass.set_pipeline(&self.gbuffer_pipeline);
+                gbuffer_pass.set_bind_group(1, &self.sprite_atlas_bind_group, &[]);
+                gbuffer_pass.set_vertex_buffer(0, self.gbuffer_instance_buffer.slice(..));
+                gbuffer_pass.draw(0..4, 0..1);
+            }
         }
 
         {
             let mut compositor_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("gbuffer pass"),
+                label: Some("compositor pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &output_view, //&frame_buffer_view
                     depth_slice: None,
@@ -499,6 +696,79 @@ impl Renderer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         self.queue.present(output);
+
+        Ok(())
+    }
+
+    fn grow_gbuffer_instance_buffer(&mut self, min_capacity: u64) {
+        let instance_size = size_of::<GBufferInstanceInput>() as u64;
+
+        // Double the instance count capacity, or use min_capacity (with a sensible default minimum like 64)
+        let new_capacity = std::cmp::max(
+            min_capacity,
+            std::cmp::max(self.gbuffer_instance_capacity * 2, 64),
+        );
+
+        let new_size = new_capacity * instance_size;
+
+        self.gbuffer_instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gbuffer instance buffer"),
+            size: new_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.gbuffer_instance_capacity = new_capacity;
+    }
+
+    pub fn write_gbuffer_instances(
+        &mut self,
+        start_pos: u64,
+        instances: &[GBufferInstanceInput],
+    ) -> anyhow::Result<()> {
+        if instances.len() == 0 {
+            return Ok(());
+        }
+
+        let required_capacity: u64 = start_pos + instances.len() as u64;
+
+        if required_capacity >= self.gbuffer_instance_capacity {
+            self.grow_gbuffer_instance_buffer(required_capacity);
+        }
+
+        self.gbuffer_instance_count = std::cmp::max(required_capacity, self.gbuffer_instance_count);
+
+        let instance_size = size_of::<GBufferInstanceInput>() as u64;
+
+        self.queue
+            .write_buffer_with(
+                &self.gbuffer_instance_buffer,
+                instance_size * start_pos,
+                std::num::NonZero::new(instance_size * instances.len() as u64)
+                    .ok_or(anyhow::anyhow!("instance must not be zero size"))?,
+            )
+            .ok_or(anyhow::anyhow!("failed to write buffer"))?
+            .copy_from_slice(bytemuck::cast_slice(instances));
+
+        Ok(())
+    }
+
+    pub fn update_gameobjects(&mut self, game_objects: &[GameObject]) -> anyhow::Result<()> {
+        let instances: Vec<GBufferInstanceInput> = game_objects
+            .iter()
+            .map(|object| GBufferInstanceInput {
+                position: object.transform.position,
+                rotation: object.transform.rotation,
+                size: glam::Vec2::new(object.size.0 as f32, object.size.1 as f32),
+                texture_offset: self
+                    .sprite_atlas
+                    .get_offset(object.sprite_id.clone())
+                    .unwrap()
+                    .into(),
+            })
+            .collect();
+
+        self.write_gbuffer_instances(0, &instances);
 
         Ok(())
     }

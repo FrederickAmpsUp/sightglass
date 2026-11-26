@@ -42,7 +42,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     )[vertex_index];
 
     out.clip_position = vec4<f32>(normpos, 0.0, 1.0);
-    out.world_position = (normpos * 0.5 + 0.5) * 1024;
+    out.world_position = (normpos * 0.5 + 0.5) * 1024.0;
 
     return out;
 }
@@ -52,7 +52,7 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
 
     let gbuffer_sample = sample_gbuffer(in.world_position);
-    out.frame_buf = gbuffer_sample.gb_albd;
+    out.frame_buf = vec4<f32>(gbuffer_sample.gb_albd.rgb, 1.0);
 
     return out;
 }

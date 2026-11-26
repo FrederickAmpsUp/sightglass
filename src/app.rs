@@ -54,9 +54,9 @@ impl ApplicationHandler<Engine> for App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            // If we are not on web we can use pollster to
+            // If we are not on web we can use smol to
             // await the window creation
-            self.engine = Some(pollster::block_on(Engine::new(window)).unwrap());
+            self.engine = Some(smol::block_on(Engine::new(window)).unwrap());
         }
 
         #[cfg(target_arch = "wasm32")]

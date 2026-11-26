@@ -1,6 +1,6 @@
 use std::{
     any::{Any, TypeId},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -9,45 +9,61 @@ use aseprite::AsepriteFile;
 use futures::{future::try_join_all, lock::Mutex};
 use serde::{Deserialize, Serialize};
 
+use crate::transform::Transform;
+
 pub trait FromAssets: Sized + Send + Sync {
-    async fn from_assets(asset_manager: &AssetManager, filename: &str) -> anyhow::Result<Self>;
+    fn from_assets(
+        asset_manager: &AssetManagerInner,
+        filename: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self>> + std::marker::Send;
 }
 
 #[derive(Serialize, Deserialize)]
 struct SerGameObjectTemplate {
-    width: u32,
-    height: u32,
+    size: (u32, u32),
     sprite_filename: String,
 }
 
 pub struct GameObjectTemplate {
-    pub width: u32,
-    pub height: u32,
-    pub sprite: AsepriteFile,
+    pub size: (u32, u32),
+    pub sprite_filename: String,
+    pub sprite: Arc<AsepriteFile>,
 }
 
 impl FromAssets for GameObjectTemplate {
-    async fn from_assets(_asset_manager: &AssetManager, filename: &str) -> anyhow::Result<Self> {
+    async fn from_assets(
+        asset_manager: &AssetManagerInner,
+        filename: &str,
+    ) -> anyhow::Result<Self> {
         let bytes = load_asset(filename).await?;
         let ser_self: SerGameObjectTemplate = ron::from_str(str::from_utf8(&bytes)?)?;
 
-        let sprite_bytes = load_asset(&ser_self.sprite_filename).await?;
-        let sprite = AsepriteFile::from_reader(&sprite_bytes[..])?;
+        let sprite = asset_manager
+            .get_or_load::<aseprite::AsepriteFile>(&ser_self.sprite_filename)
+            .await?;
 
         Ok(Self {
-            width: ser_self.width,
-            height: ser_self.height,
+            size: ser_self.size,
+            sprite_filename: ser_self.sprite_filename,
             sprite,
         })
+    }
+}
+
+impl FromAssets for aseprite::AsepriteFile {
+    async fn from_assets(
+        _asset_manager: &AssetManagerInner,
+        filename: &str,
+    ) -> anyhow::Result<Self> {
+        let bytes = load_asset(filename).await?;
+        Ok(AsepriteFile::from_reader(&bytes[..])?)
     }
 }
 
 #[derive(Serialize, Deserialize)]
 struct SerSceneGameObjectInstantiation {
     template_filename: String,
-    x: u32,
-    y: u32,
-    // TODO: rotation
+    transform: Transform,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -57,8 +73,7 @@ struct SerSceneTemplate {
 
 pub struct SceneGameObjectInstantiation {
     pub template: Arc<GameObjectTemplate>,
-    pub x: u32,
-    pub y: u32,
+    pub transform: Transform,
 }
 
 pub struct SceneTemplate {
@@ -66,7 +81,10 @@ pub struct SceneTemplate {
 }
 
 impl FromAssets for SceneTemplate {
-    async fn from_assets(asset_manager: &AssetManager, filename: &str) -> anyhow::Result<Self> {
+    async fn from_assets(
+        asset_manager: &AssetManagerInner,
+        filename: &str,
+    ) -> anyhow::Result<Self> {
         let bytes = load_asset(filename).await?;
         let ser_self: SerSceneTemplate = ron::from_str(str::from_utf8(&bytes)?)?;
 
@@ -76,8 +94,7 @@ impl FromAssets for SceneTemplate {
 
             Ok::<_, anyhow::Error>(SceneGameObjectInstantiation {
                 template,
-                x: ser_go.x,
-                y: ser_go.y,
+                transform: ser_go.transform,
             })
         }))
         .await?;
@@ -86,14 +103,16 @@ impl FromAssets for SceneTemplate {
     }
 }
 
-pub struct AssetManager {
+pub struct AssetManagerInner {
     assets: Mutex<HashMap<(TypeId, String), Arc<dyn Any + Send + Sync>>>,
+    active_loads: Mutex<HashSet<(TypeId, String)>>,
 }
 
-impl AssetManager {
+impl AssetManagerInner {
     pub fn new() -> Self {
         Self {
             assets: Mutex::new(HashMap::new()),
+            active_loads: Mutex::new(HashSet::new()),
         }
     }
 
@@ -124,6 +143,61 @@ impl AssetManager {
         cache.insert(key, gen_asset_arc);
 
         Ok(asset_arc)
+    }
+
+    pub fn try_load<T: 'static + FromAssets>(self: &Arc<Self>, filename: &str) -> Option<Arc<T>> {
+        let type_id = TypeId::of::<T>();
+        let key = (type_id, filename.to_string());
+
+        if let Some(cache) = self.assets.try_lock() {
+            if let Some(gen_asset) = cache.get(&key) {
+                match gen_asset.clone().downcast::<T>() {
+                    Ok(asset) => {
+                        return Some(asset);
+                    }
+                    Err(_) => unreachable!("item insert as (TypeId::of::<T>(), ...) is of type T"),
+                }
+            }
+        }
+
+        // if we are already loading the asset we must wait
+        if let Some(_) = self.active_loads.try_lock()?.get(&key) {
+            return None;
+        }
+
+        let this = self.clone();
+        let move_filename = filename.to_owned();
+        crate::future::spawn_task(async move {
+            if let Err(e) = this.get_or_load::<T>(&move_filename).await {
+                log::error!("error while loading asset: {}", e);
+            }
+        });
+
+        None
+    }
+}
+
+#[derive(Clone)]
+pub struct AssetManager {
+    inner: Arc<AssetManagerInner>,
+}
+
+impl AssetManager {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(AssetManagerInner::new()),
+        }
+    }
+
+    pub async fn get_or_load<T: 'static + FromAssets>(
+        &self,
+        filename: &str,
+    ) -> anyhow::Result<Arc<T>> {
+        self.inner.get_or_load(filename).await
+    }
+
+    pub fn try_load<T: 'static + FromAssets>(&self, filename: &str) -> Option<Arc<T>> {
+        self.inner.try_load(filename)
     }
 }
 

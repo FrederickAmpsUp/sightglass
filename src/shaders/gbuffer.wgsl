@@ -1,15 +1,18 @@
 struct VertexInput {
-    @builtin(vertex_index) vertex_index: u32
-}
+    @builtin(vertex_index) vertex_index: u32,
 
-struct InstanceInput {
-    size: vec2<f32>,
-    position: vec2<f32>,
-    rotation: f32
+    @location(0) size: vec2<f32>,
+    @location(1) position: vec2<f32>,
+    @location(2) rotation: f32,
+    @location(3) texture_offset: vec2<u32>,
 }
 
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+
+    @location(1) @interpolate(flat) size: vec2<f32>,
+    @location(2) @interpolate(flat) texture_offset: vec2<u32>
 }
 
 struct FragmentOutput {
@@ -18,18 +21,55 @@ struct FragmentOutput {
     @location(2) gb_norm: vec4<f32>,
 }
 
+@group(1) @binding(0) var sprite_type: texture_2d<u32>;
+@group(1) @binding(1) var sprite_albd: texture_2d<f32>;
+@group(1) @binding(2) var sprite_norm: texture_2d<f32>;
+
+struct SpriteSample {
+    s_type: u32,
+    s_albd: vec4<f32>,
+    s_norm: vec4<f32>,
+}
+
+fn sample_sprite(vo: VertexOutput) -> SpriteSample {
+    let pxl: vec2<u32> = vec2<u32>((vo.uv * vo.size)) + vo.texture_offset;
+
+    var out: SpriteSample;
+
+    out.s_type = textureLoad(sprite_type, pxl, 0).r;
+    out.s_albd = textureLoad(sprite_albd, pxl, 0).rgba;
+    out.s_norm = textureLoad(sprite_norm, pxl, 0).rgba;
+
+    return out;
+}
+
+fn rotate2d(theta: f32) -> mat2x2<f32> {
+    let c = cos(theta);
+    let s = sin(theta);
+    return mat2x2<f32>(
+        vec2<f32>(c, s),
+        vec2<f32>(-s, c)
+    );
+}
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let normpos = array<vec2<f32>, 4>(
+    let norm_pos = array<vec2<f32>, 4>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
         vec2<f32>(-1.0,  1.0),
-        vec2<f32>( 2.0,  1.0)
+        vec2<f32>( 1.0,  1.0)
     )[in.vertex_index];
 
-    out.clip_position = vec4<f32>(normpos / 2.0, 0.0, 1.0);
+    let world_pos = rotate2d(in.rotation) * (norm_pos * in.size / 2.0) + in.position;
+
+    out.clip_position = vec4<f32>((world_pos / 1024.0) * 2.0 - 1.0, 0.0, 1.0);
+    out.uv = norm_pos * 0.5 + 0.5;
+
+    out.size = in.size;
+    out.texture_offset = in.texture_offset;
 
     return out;
 }
@@ -38,9 +78,11 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
 
-    out.gb_type = 1;
-    out.gb_albd = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-    out.gb_norm = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    let sprite = sample_sprite(in);
+
+    out.gb_type = sprite.s_type;
+    out.gb_albd = sprite.s_albd;
+    out.gb_norm = sprite.s_norm;
 
     return out;
 }
