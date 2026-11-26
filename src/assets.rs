@@ -11,6 +11,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::transform::Transform;
 
+// the future must be Send on native and !Send on web
+#[cfg(target_arch = "wasm32")]
+pub trait FromAssets: Sized + Send + Sync {
+    fn from_assets(
+        asset_manager: &AssetManagerInner,
+        filename: &str,
+    ) -> impl std::future::Future<Output = anyhow::Result<Self>>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub trait FromAssets: Sized + Send + Sync {
     fn from_assets(
         asset_manager: &AssetManagerInner,
