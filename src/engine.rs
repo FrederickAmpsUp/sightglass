@@ -52,11 +52,10 @@ impl Engine {
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
-        self.update()?; // TODO: call this more sensibly
         self.window.request_redraw();
 
         if let Some(scene) = &self.scene {
-            self.renderer.update_gameobjects(&scene.game_objects);
+            self.renderer.update_gameobjects(&scene.game_objects)?;
         }
 
         self.renderer.render()?;

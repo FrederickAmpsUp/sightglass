@@ -101,7 +101,7 @@ impl ApplicationHandler<Engine> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => engine.resize(size.width, size.height),
-            WindowEvent::RedrawRequested => match engine.render() {
+            WindowEvent::RedrawRequested => match engine.update().and_then(|_| engine.render()) {
                 Ok(()) => (),
                 Err(e) => {
                     log::error!("{}", e);
