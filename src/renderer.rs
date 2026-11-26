@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Frederick Ziola
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
 use crate::{game_object::GameObject, sprite_atlas::SpriteAtlas, viewport::Viewport};
 use bytemuck::{offset_of, Pod, Zeroable};
 use std::sync::Arc;

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Frederick Ziola
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) world_position: vec2<f32>

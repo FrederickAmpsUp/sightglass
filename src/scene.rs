@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 Frederick Ziola
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
 use glam::Vec2;
 
 use crate::engine::Engine;
