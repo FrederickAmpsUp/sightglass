@@ -662,7 +662,7 @@ impl Renderer {
                 gbuffer_pass.set_pipeline(&self.gbuffer_pipeline);
                 gbuffer_pass.set_bind_group(1, &self.sprite_atlas_bind_group, &[]);
                 gbuffer_pass.set_vertex_buffer(0, self.gbuffer_instance_buffer.slice(..));
-                gbuffer_pass.draw(0..4, 0..1);
+                gbuffer_pass.draw(0..4, 0..(self.gbuffer_instance_count as u32));
             }
         }
 
@@ -768,7 +768,7 @@ impl Renderer {
             })
             .collect();
 
-        self.write_gbuffer_instances(0, &instances);
+        self.write_gbuffer_instances(0, &instances)?;
 
         Ok(())
     }

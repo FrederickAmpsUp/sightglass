@@ -1,10 +1,17 @@
 SerSceneTemplate(
     game_objects: [
-        SerSceneGameObjectInstantiation(
+        (
             template_filename: "convex_refractor.ron",
             transform: Transform (
                 position: Vec2(512.0, 512.0),
                 rotation: 0.0
+            )
+        ),
+        (
+            template_filename: "convex_refractor.ron",
+            transform: Transform (
+                position: Vec2(450.0, 512.0),
+                rotation: 0.8
             )
         )
     ]
