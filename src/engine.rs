@@ -47,6 +47,8 @@ impl Engine {
 
     pub fn update(&mut self) -> anyhow::Result<()> {
         let (time, dt) = self.clock.tick();
+
+        self.renderer.set_time(time);
         if self.scene.is_none() {
             if let Some(scene_template) = self.asset_manager.try_load("test_scene.ron") {
                 self.scene = Some(Scene::from_template(self, &scene_template)?);
@@ -54,7 +56,9 @@ impl Engine {
         }
 
         if let Some(scene) = &mut self.scene {
-            for go in &mut scene.game_objects {}
+            for go in &mut scene.game_objects {
+                go.transform.rotation += dt;
+            }
         }
 
         Ok(())

@@ -22,7 +22,7 @@ struct GBufferInstanceInput {
 struct Uniforms {
     pub time: f32,
 
-    pub dirty: u32,
+    pub light_segment_workgroups: u32,
 
     pub viewport_center: glam::Vec2,
     pub viewport_size: glam::Vec2,
@@ -43,6 +43,7 @@ pub struct Renderer {
     pub queue: wgpu::Queue,
 
     uniforms: Uniforms,
+    uniforms_dirty: bool,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
 
@@ -100,7 +101,7 @@ impl Renderer {
     const GBUFFER_ALBD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const GBUFFER_NORM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-    const LIGHT_WORKGROUPS: u64 = 128;
+    const LIGHT_WORKGROUPS: u64 = 18;
     const LIGHT_WORKGROUP_SIZE: u64 = 64;
     const LIGHT_MAX_SEGMENTS_PER_INVOC: u64 = 10;
 
@@ -175,6 +176,8 @@ impl Renderer {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
+        log::info!("{:#?}", surface_format);
+
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -184,7 +187,7 @@ impl Renderer {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
-            color_space: wgpu::SurfaceColorSpace::Auto,
+            color_space: wgpu::SurfaceColorSpace::Srgb,
         };
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -838,6 +841,7 @@ impl Renderer {
             queue,
 
             uniforms: Uniforms::default(),
+            uniforms_dirty: true,
             uniform_buffer,
             uniform_bind_group,
 
@@ -898,7 +902,8 @@ impl Renderer {
             return Ok(());
         }
 
-        if self.uniforms.dirty != 0 {
+        self.uniforms.light_segment_workgroups = Self::LIGHT_WORKGROUPS as u32;
+        if self.uniforms_dirty {
             self.upload_uniforms();
         }
 
@@ -1095,7 +1100,12 @@ impl Renderer {
         self.uniforms.viewport_size.y =
             viewport.width * self.surface_config.height as f32 / self.surface_config.width as f32;
 
-        self.uniforms.dirty = 1;
+        self.uniforms_dirty = true;
+    }
+
+    pub fn set_time(&mut self, time: f32) {
+        self.uniforms.time = time;
+        self.uniforms_dirty = true;
     }
 
     fn upload_uniforms(&mut self) {
@@ -1104,7 +1114,7 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&[self.uniforms]),
         );
-        self.uniforms.dirty = 0;
+        self.uniforms_dirty = false;
     }
 
     fn grow_gbuffer_instance_buffer(&mut self, min_capacity: u64) {

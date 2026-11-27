@@ -40,11 +40,12 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
 
     let gbuffer_sample = sample_gbuffer(in.world_position);
-    let light_map_sample = textureSample(light_map, light_map_sampler, in.world_position / 1024.0);
-    var col = light_map_sample;//vec4<f32>(gbuffer_sample.gb_norm.rgb, 1.0);
-    col = max(col, vec4<f32>(0.0)); // remove negatives
+    let light_map_sample = textureSample(light_map, light_map_sampler, vec2<f32>(in.world_position.x / 1024.0, 1.0 - in.world_position.y / 1024.0));
+    var col = light_map_sample.rgb + gbuffer_sample.gb_albd.rgb * 0.1;
+    col = max(col, vec3<f32>(0.0)); // remove negatives
 
-    out.frame_buf = pow(col, vec4<f32>(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2, 1.0));
+    out.frame_buf = vec4<f32>(col, 1.0);
+    out.frame_buf = pow(out.frame_buf, vec4<f32>(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2, 1.0));
     return out;
 }
 

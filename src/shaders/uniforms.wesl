@@ -1,5 +1,7 @@
 struct Uniforms {
     time: f32,
+    light_segment_workgroups: u32,
+
     viewport_center: vec2<f32>,
     viewport_size: vec2<f32>,
 }
