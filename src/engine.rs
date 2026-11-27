@@ -54,9 +54,7 @@ impl Engine {
         }
 
         if let Some(scene) = &mut self.scene {
-            for go in &mut scene.game_objects {
-                go.transform.rotation += dt;
-            }
+            for go in &mut scene.game_objects {}
         }
 
         Ok(())

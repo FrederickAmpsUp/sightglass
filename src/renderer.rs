@@ -27,6 +27,13 @@ struct Uniforms {
     pub viewport_size: glam::Vec2,
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Default, Pod, Zeroable)]
+struct LightSegmentVertex {
+    pub position: glam::Vec2,
+    pub color: u32, // packed RGBA8unorm
+}
+
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
@@ -57,13 +64,26 @@ pub struct Renderer {
 
     gbuffer_bind_group: wgpu::BindGroup,
 
+    light_segment_vertices: wgpu::Buffer,
+    light_segment_indirect_args: wgpu::Buffer,
+
+    light_segment_bind_group: wgpu::BindGroup,
+
     light_map: wgpu::Texture,
+    light_map_msaa: wgpu::Texture,
+
+    light_map_sampler: wgpu::Sampler,
+    light_map_view: wgpu::TextureView,
+    light_map_msaa_view: wgpu::TextureView,
+
+    light_map_bind_group: wgpu::BindGroup,
 
     frame_buffer: wgpu::Texture,
 
     // see render_pipeline.excalidraw
     gbuffer_pipeline: wgpu::RenderPipeline,
-    lighting_pipeline: wgpu::ComputePipeline,
+    light_segment_pipeline: wgpu::ComputePipeline,
+    light_draw_pipeline: wgpu::RenderPipeline,
     compositor_pipeline: wgpu::RenderPipeline,
 }
 
@@ -79,7 +99,16 @@ impl Renderer {
     const GBUFFER_ALBD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const GBUFFER_NORM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-    const LIGHT_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+    const LIGHT_WORKGROUPS: u64 = 4; // 1024
+    const LIGHT_WORKGROUP_SIZE: u64 = 64;
+    const LIGHT_MAX_SEGMENTS_PER_INVOC: u64 = 10;
+
+    const LIGHT_SEGMENT_VERTICES_SIZE: u64 = 2
+        * Self::LIGHT_WORKGROUPS
+        * Self::LIGHT_WORKGROUP_SIZE
+        * Self::LIGHT_MAX_SEGMENTS_PER_INVOC;
+
+    const LIGHT_MAP_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
     const FRAME_BUFFER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -487,24 +516,241 @@ impl Renderer {
             cache: None,
         });
 
+        let light_segment_vertices_size =
+            size_of::<LightSegmentVertex>() as u64 * Self::LIGHT_SEGMENT_VERTICES_SIZE;
+        let light_segment_vertices = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("light segment vertices"),
+            size: light_segment_vertices_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
+        let light_segment_indirect_args = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("light segment indirect args"),
+            size: size_of::<wgpu::util::DrawIndirectArgs>() as u64,
+            usage: wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let light_segment_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("light segment bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            // indirect args
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: std::num::NonZero::new(size_of::<
+                                wgpu::util::DrawIndirectArgs,
+                            >()
+                                as u64),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            // vertices
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: std::num::NonZero::new(light_segment_vertices_size),
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let light_segment_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("light segment bind group"),
+            layout: &light_segment_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    // indirect args
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &light_segment_indirect_args,
+                        offset: 0,
+                        size: std::num::NonZero::new(
+                            size_of::<wgpu::util::DrawIndirectArgs>() as u64
+                        ),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    // vertices
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &light_segment_vertices,
+                        offset: 0,
+                        size: std::num::NonZero::new(light_segment_vertices_size),
+                    }),
+                },
+            ],
+        });
+
         let light_map = Self::create_world_buffer(&device, Self::LIGHT_MAP_FORMAT);
+        let light_map_msaa = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("light map msaa"),
+            size: wgpu::Extent3d {
+                width: Self::WORLD_BUFFER_WIDTH,
+                height: Self::WORLD_BUFFER_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 4,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::LIGHT_MAP_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
 
-        let lighting_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shaders/lighting.wgsl"));
+        let light_map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("light map sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
 
-        let lighting_pipeline_layout =
+        let light_map_view = light_map.create_view(&wgpu::TextureViewDescriptor {
+            mip_level_count: Some(1),
+            ..Default::default()
+        });
+        let light_map_msaa_view =
+            light_map_msaa.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let light_map_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("light map bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let light_map_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("light map bind group"),
+            layout: &light_map_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&light_map_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&light_map_view),
+                },
+            ],
+        });
+
+        let light_segment_shader =
+            device.create_shader_module(wgpu::include_wgsl!("shaders/light_segment.wgsl"));
+
+        let light_segment_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("lighting pipeline layout"),
+                label: Some("light segment pipeline layout"),
+                bind_group_layouts: &[
+                    Some(&uniform_bind_group_layout),
+                    Some(&gbuffer_bind_group_layout),
+                    Some(&light_segment_bind_group_layout),
+                ],
+                immediate_size: 0,
+            });
+
+        let light_segment_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("light segment pipeline"),
+                layout: Some(&light_segment_pipeline_layout),
+                module: &light_segment_shader,
+                entry_point: Some("cs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None,
+            });
+
+        let light_draw_shader =
+            device.create_shader_module(wgpu::include_wgsl!("shaders/light_draw.wgsl"));
+
+        let light_draw_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("light draw pipeline layout"),
                 bind_group_layouts: &[],
                 immediate_size: 0,
             });
 
-        let lighting_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("lighting pipeline"),
-            layout: Some(&lighting_pipeline_layout),
-            module: &lighting_shader,
-            entry_point: Some("cs_main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        let light_draw_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("light draw pipeline"),
+            layout: Some(&light_draw_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &light_draw_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: size_of::<LightSegmentVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: offset_of!(LightSegmentVertex, position) as u64,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Uint32,
+                            offset: offset_of!(LightSegmentVertex, color) as u64,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                count: 4,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &light_draw_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: Self::LIGHT_MAP_FORMAT,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::all(),
+                })],
+            }),
+            multiview_mask: None,
             cache: None,
         });
 
@@ -532,6 +778,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     Some(&uniform_bind_group_layout),
                     Some(&gbuffer_bind_group_layout),
+                    Some(&light_map_bind_group_layout),
                 ],
                 immediate_size: 0,
             });
@@ -606,12 +853,24 @@ impl Renderer {
 
             gbuffer_bind_group,
 
+            light_segment_vertices,
+            light_segment_indirect_args,
+            light_segment_bind_group,
+
+            light_map_msaa,
             light_map,
+
+            light_map_sampler,
+            light_map_view,
+            light_map_msaa_view,
+
+            light_map_bind_group,
 
             frame_buffer,
 
             gbuffer_pipeline,
-            lighting_pipeline,
+            light_segment_pipeline,
+            light_draw_pipeline,
             compositor_pipeline,
         })
     }
@@ -729,6 +988,62 @@ impl Renderer {
             }
         }
 
+        // reset the indirect args (specifically vertex count)
+        self.queue.write_buffer(
+            &self.light_segment_indirect_args,
+            0,
+            bytemuck::cast_slice(&[wgpu::util::DrawIndirectArgs {
+                first_vertex: 0,
+                vertex_count: 0,
+                first_instance: 0,
+                instance_count: 1,
+            }]),
+        );
+
+        {
+            let mut light_segment_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("light segment pass"),
+                timestamp_writes: None,
+            });
+
+            light_segment_pass.set_pipeline(&self.light_segment_pipeline);
+            light_segment_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            light_segment_pass.set_bind_group(1, &self.gbuffer_bind_group, &[]);
+            light_segment_pass.set_bind_group(2, &self.light_segment_bind_group, &[]);
+
+            light_segment_pass.dispatch_workgroups(Self::LIGHT_WORKGROUPS as u32, 1, 1);
+        }
+
+        {
+            let mut light_draw_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("light draw pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.light_map_msaa_view,
+                    depth_slice: None,
+                    resolve_target: Some(&self.light_map_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 0.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                multiview_mask: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            light_draw_pass.set_pipeline(&self.light_draw_pipeline);
+            light_draw_pass.set_vertex_buffer(0, self.light_segment_vertices.slice(..));
+            light_draw_pass.draw_indirect(&self.light_segment_indirect_args, 0);
+        }
+
+        // TODO: light accumulation
+
         {
             let mut compositor_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("compositor pass"),
@@ -755,6 +1070,7 @@ impl Renderer {
             compositor_pass.set_pipeline(&self.compositor_pipeline);
             compositor_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             compositor_pass.set_bind_group(1, &self.gbuffer_bind_group, &[]);
+            compositor_pass.set_bind_group(2, &self.light_map_bind_group, &[]);
             compositor_pass.draw(0..4, 0..1);
         }
 

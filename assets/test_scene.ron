@@ -1,20 +1,20 @@
 SerSceneTemplate(
     initial_viewport: (
-        center: Vec2(488.0, 512.0),
-        width: 128.0,
+        center: Vec2(512.0, 512.0),
+        width: 256.0,
     ),
     game_objects: [
         (
             template_filename: "convex_refractor.ron",
             transform: Transform (
-                position: Vec2(512.0, 512.0),
+                position: Vec2(576.0, 512.0),
                 rotation: 0.0
             )
         ),
         (
-            template_filename: "convex_refractor.ron",
+            template_filename: "block_diffuser.ron",
             transform: Transform (
-                position: Vec2(450.0, 512.0),
+                position: Vec2(448.0, 512.0),
                 rotation: 0.8
             )
         )

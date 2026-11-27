@@ -1,0 +1,4 @@
+SerGameObjectTemplate(
+    size: (16, 16),
+    sprite_filename: "block_diffuser.ase"
+)

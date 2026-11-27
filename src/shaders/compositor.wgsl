@@ -27,6 +27,11 @@ var gb_albd: texture_2d<f32>;
 @group(1) @binding(2)
 var gb_norm: texture_2d<f32>;
 
+@group(2) @binding(0)
+var light_map_sampler: sampler;
+@group(2) @binding(1)
+var light_map: texture_2d<f32>;
+
 struct GBufferSample {
     gb_type: u32,
     gb_albd: vec4<f32>,
@@ -65,8 +70,9 @@ fn fs_main(in: VertexOutput) -> FragmentOutput {
     var out: FragmentOutput;
 
     let gbuffer_sample = sample_gbuffer(in.world_position);
-    var col = vec4<f32>(gbuffer_sample.gb_norm.rgb, 1.0);
-    col = max(col, vec4<f32>(0.0));
+    let light_map_sample = textureSample(light_map, light_map_sampler, in.world_position / 1024.0);
+    var col = light_map_sample;//vec4<f32>(gbuffer_sample.gb_norm.rgb, 1.0);
+    col = max(col, vec4<f32>(0.0)); // remove negatives
 
     out.frame_buf = pow(col, vec4<f32>(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2, 1.0));
     return out;
