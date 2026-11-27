@@ -40,9 +40,11 @@ log = "0.4.35"
 ron = "0.12.3"
 serde = { version = "1.0.229", features = ["derive"] }
 web-time = "1.1.0"
+wesl = "0.4.2"
 wgpu = "30.0.2"
 winit = "0.30.13"
 
 [build-dependencies]
 copy_to_output = "2.2.0"
 glob = "0.3.4"
+wesl = "0.4.2"

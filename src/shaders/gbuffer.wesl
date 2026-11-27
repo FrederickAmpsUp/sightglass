@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
+import package::uniforms::uniforms;
+
 struct VertexInput {
     @builtin(vertex_index) vertex_index: u32,
 

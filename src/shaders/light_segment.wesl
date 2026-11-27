@@ -2,21 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-only
 
-struct Uniforms {
-    time: f32,
-    viewport_center: vec2<f32>,
-    viewport_size: vec2<f32>,
-}
-
-@group(0) @binding(0)
-var<uniform> uniforms: Uniforms;
-
-@group(1) @binding(0)
-var gb_type: texture_2d<u32>;
-@group(1) @binding(1)
-var gb_albd: texture_2d<f32>;
-@group(1) @binding(2)
-var gb_norm: texture_2d<f32>;
+import package::{uniforms::uniforms, gbuffer_sample::sample_gbuffer};
 
 struct DrawIndirectArgs {
     vertex_count: atomic<u32>,
@@ -36,22 +22,6 @@ var<storage, read_write> indirect_args: DrawIndirectArgs;
 @group(2) @binding(1)
 var<storage, read_write> vertices: array<SegmentVertex>;
 
-struct GBufferSample {
-    gb_type: u32,
-    gb_albd: vec4<f32>,
-    gb_norm: vec4<f32>
-}
-
-fn sample_gbuffer(wpos: vec2<f32>) -> GBufferSample {
-    let pxl = vec2<u32>(wpos);
-
-    let s_type = textureLoad(gb_type, pxl, 0).r;
-    let s_albd = textureLoad(gb_albd, pxl, 0);
-    let s_norm = textureLoad(gb_norm, pxl, 0) * 2.0 - 1.0;
-
-    return GBufferSample(s_type, s_albd, s_norm);
-}
-
 const MAX_SEGMENTS_PER_THREAD = 10u;
 
 var<private> local_vertices: array<SegmentVertex, 2*MAX_SEGMENTS_PER_THREAD>;
@@ -70,12 +40,13 @@ fn push_vertex(position: vec2<f32>, color: vec4<f32>) {
 fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let index = gid.x;
 
-    let theta = 6.28 * f32(index) / 256.0;
+    let theta = 6.28318 * f32(index) / (128.0 * 64.0);
 
     let center = vec2<f32>(512.0, 512.0);
     let r = 1024.0;
 
-    let color = vec4<f32>(0.01, 0.01, 0.01, 1.0);//vec4<f32>(vec3<f32>(f32(index) / 256.0), 1.0);
+    let channel = index % 3;
+    let color = vec4<f32>(0.005 * f32(channel == 0), 0.005 * f32(channel == 1), 0.005 * f32(channel == 2), 1.0);//vec4<f32>(vec3<f32>(f32(index) / 256.0), 1.0);
 
     push_vertex(center, color);
     push_vertex(center + vec2<f32>(cos(theta), sin(theta)) * r, color);

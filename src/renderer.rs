@@ -5,6 +5,7 @@
 use crate::{game_object::GameObject, sprite_atlas::SpriteAtlas, viewport::Viewport};
 use bytemuck::{offset_of, Pod, Zeroable};
 use std::sync::Arc;
+use wesl::include_wesl;
 use winit::window::Window;
 
 #[repr(C)]
@@ -99,7 +100,7 @@ impl Renderer {
     const GBUFFER_ALBD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
     const GBUFFER_NORM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-    const LIGHT_WORKGROUPS: u64 = 4; // 1024
+    const LIGHT_WORKGROUPS: u64 = 128;
     const LIGHT_WORKGROUP_SIZE: u64 = 64;
     const LIGHT_MAX_SEGMENTS_PER_INVOC: u64 = 10;
 
@@ -421,8 +422,10 @@ impl Renderer {
             ],
         });
 
-        let gbuffer_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shaders/gbuffer.wgsl"));
+        let gbuffer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gbuffer"),
+            source: wgpu::ShaderSource::Wgsl(include_wesl!("gbuffer").into()),
+        });
 
         let gbuffer_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -665,8 +668,10 @@ impl Renderer {
             ],
         });
 
-        let light_segment_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shaders/light_segment.wgsl"));
+        let light_segment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("light segment"),
+            source: wgpu::ShaderSource::Wgsl(include_wesl!("light_segment").into()),
+        });
 
         let light_segment_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -689,8 +694,10 @@ impl Renderer {
                 cache: None,
             });
 
-        let light_draw_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shaders/light_draw.wgsl"));
+        let light_draw_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("light draw"),
+            source: wgpu::ShaderSource::Wgsl(include_wesl!("light_draw").into()),
+        });
 
         let light_draw_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -769,8 +776,10 @@ impl Renderer {
             view_formats: &[Self::FRAME_BUFFER_FORMAT],
         });
 
-        let compositor_shader =
-            device.create_shader_module(wgpu::include_wgsl!("shaders/compositor.wgsl"));
+        let compositor_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("compositor"),
+            source: wgpu::ShaderSource::Wgsl(include_wesl!("compositor").into()),
+        });
 
         let compositor_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
